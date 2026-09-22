@@ -1,0 +1,18 @@
+config G0N_SCREEN_GLITCH
+    bool "g0ndev: pantalla con logo glitch (Arasaka style)"
+    select LV_USE_IMG
+    select LV_USE_ANIMIMG
+
+config G0N_SCREEN_BATT
+    bool "g0ndev: pantalla con bateria de ambas mitades"
+    select LV_USE_CANVAS
+    select LV_USE_LABEL
+    select LV_FONT_MONTSERRAT_12
+    select LV_FONT_MONTSERRAT_16
+
+config G0N_BATT_RELAY
+    bool "g0ndev: el dongle reenvia la bateria de cada mitad a las mitades"
+    depends on ZMK_SPLIT_RELAY_EVENT
+
+config G0N_OLED_INVERTED
+    bool "g0ndev: invertir colores"

@@ -1,15 +1,16 @@
----
 include:
   - board: nice_nano_v2
     shield: eyelash_sofle_central_dongle dongle_display
     snippet: studio-rpc-usb-uart
-    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
-    artifact-name: eyelash_sofle_central_dongle
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n -DCONFIG_G0N_BATT_RELAY=y
+    artifact-name: g0n_sofle_central_dongle
   - board: nice_nano_v2
-    shield: eyelash_sofle_peripheral_left nice_oled
-    artifact-name: eyelash_sofle_left
+    shield: eyelash_sofle_peripheral_left
+    cmake-args: -DCONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM=y -DCONFIG_G0N_SCREEN_BATT=y -DCONFIG_ZMK_DISPLAY_BLANK_ON_IDLE=y
+    artifact-name: g0n_sofle_left
   - board: nice_nano_v2
-    shield: eyelash_sofle_peripheral_right nice_oled
-    artifact-name: eyelash_sofle_right
+    shield: eyelash_sofle_peripheral_right
+    cmake-args: -DCONFIG_ZMK_DISPLAY_STATUS_SCREEN_CUSTOM=y -DCONFIG_G0N_SCREEN_GLITCH=y -DCONFIG_ZMK_DISPLAY_BLANK_ON_IDLE=y
+    artifact-name: g0n_sofle_right
   - board: nice_nano_v2
     shield: settings_reset

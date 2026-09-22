@@ -1,0 +1,7 @@
+if(CONFIG_G0N_SCREEN_GLITCH OR CONFIG_G0N_SCREEN_BATT OR CONFIG_G0N_BATT_RELAY)
+  zephyr_library()
+  zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+  zephyr_library_sources_ifdef(CONFIG_G0N_SCREEN_GLITCH src/g0n_frames.c src/g0n_glitch_screen.c)
+  zephyr_library_sources_ifdef(CONFIG_G0N_SCREEN_BATT src/g0n_frames.c src/g0n_batt_screen.c)
+  zephyr_library_sources_ifdef(CONFIG_G0N_BATT_RELAY src/g0n_batt_relay.c)
+endif()
