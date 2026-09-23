@@ -24,8 +24,8 @@ static lv_obj_t *canvas;
 static uint8_t self_lvl;
 static int16_t slot_lvl[2] = {-1, -1};
 
-#define BG (IS_ENABLED(CONFIG_G0N_OLED_INVERTED) ? lv_color_white() : lv_color_black())
-#define FG (IS_ENABLED(CONFIG_G0N_OLED_INVERTED) ? lv_color_black() : lv_color_white())
+#define BG (IS_ENABLED(CONFIG_G0N_OLED_INVERTED) ? lv_color_black() : lv_color_white())
+#define FG (IS_ENABLED(CONFIG_G0N_OLED_INVERTED) ? lv_color_white() : lv_color_black())
 
 static int other_level(void) {
     /* de los 2 slots, el que no coincide con nuestra bateria es la otra mitad */
@@ -52,7 +52,6 @@ static void draw_bat(int y, const char *tag, int lvl) {
     char txt[8];
     if (lvl < 0) snprintf(txt, sizeof(txt), "--");
     else snprintf(txt, sizeof(txt), "%d%%", lvl);
-    l.font = &lv_font_montserrat_16;
     lv_canvas_draw_text(canvas, 0, y + 28, W, &l, txt);
 }
 
@@ -66,7 +65,7 @@ static void redraw(void) {
     lv_canvas_draw_line(canvas, p, 2, &ln);
 
     draw_bat(20, "L", self_lvl);
-    draw_bat(74, "R", other_level());
+    draw_bat(66, "R", other_level());
 
     /* rotar 90 grados: la pantalla fisica es 128x32 montada vertical */
     memcpy(tmp, cbuf, sizeof(tmp));

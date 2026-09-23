@@ -8,7 +8,6 @@ config G0N_SCREEN_BATT
     select LV_USE_CANVAS
     select LV_USE_LABEL
     select LV_FONT_MONTSERRAT_12
-    select LV_FONT_MONTSERRAT_16
 
 config G0N_BATT_RELAY
     bool "g0ndev: el dongle reenvia la bateria de cada mitad a las mitades"
