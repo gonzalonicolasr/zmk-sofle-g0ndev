@@ -1,0 +1,9 @@
+config G0N_HUD
+    bool "g0ndev: HUD por raw HID en el dongle (paginas + avisos NERV)"
+    depends on ZMK_DISPLAY && RAW_HID
+    select LV_USE_IMG
+
+config G0N_HUD_LED_FALLBACK
+    bool "g0ndev: avisos de agente tambien por LED kana/compose"
+    depends on G0N_HUD && ZMK_HID_INDICATORS
+    default y

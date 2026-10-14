@@ -15,3 +15,5 @@ config G0N_BATT_RELAY
 
 config G0N_OLED_INVERTED
     bool "g0ndev: invertir colores"
+
+rsource "g0n_hud/Kconfig"

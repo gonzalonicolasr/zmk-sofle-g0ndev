@@ -1,0 +1,5 @@
+if(CONFIG_G0N_HUD)
+  zephyr_library()
+  zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+  zephyr_library_sources(src/hud_core.c src/hud_font.c src/hud_anim_frames.c src/hud_zmk.c)
+endif()
