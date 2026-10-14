@@ -5,6 +5,8 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
+#include <zephyr/sys/reboot.h>
 #include <lvgl.h>
 
 #include <raw_hid/events.h>
@@ -20,23 +22,20 @@
 #include <zmk/hid_indicators.h>
 #endif
 
-#include "hud_core.h"
+#include "hud_fw.h"
 
 #define PAL 8
 #define IND_COMPOSE 0x08
 #define IND_KANA 0x10
 
-struct rx_item {
-    uint8_t len;
-    uint8_t data[HUD_REPORT + 3];
-};
-
-K_MSGQ_DEFINE(hud_rxq, sizeof(struct rx_item), 24, 4);
+#ifndef G0N_HUD_COMMIT
+#define G0N_HUD_COMMIT "local"
+#endif
 
 static const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 
+static struct k_spinlock lock;
 static uint8_t img_buf[PAL + HUD_FB_SIZE] = {0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0xff};
-static uint8_t prev_fb[HUD_FB_SIZE];
 static uint8_t corner_buf[PAL + HUD_CORNER * HUD_CORNER_STRIDE] = {0xff, 0xff, 0xff, 0xff,
                                                                   0x00, 0x00, 0x00, 0xff};
 static lv_img_dsc_t img_dsc;
@@ -45,9 +44,13 @@ static lv_obj_t *img;
 static lv_obj_t *corner_img;
 static bool img_shown;
 static bool corner_shown;
-static int16_t img_x;
 static bool woke;
 static bool started;
+static atomic_t flags;
+static uint8_t boot_type;
+
+#define F_VERSION 0
+#define F_REWAKE 1
 
 static bool may_be_blanked(void) {
     return IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE) &&
@@ -57,22 +60,21 @@ static bool may_be_blanked(void) {
 static void tick_cb(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(tick_work, tick_cb);
 
+static void reboot_cb(struct k_work *work) { sys_reboot(boot_type); }
+static K_WORK_DELAYABLE_DEFINE(reboot_work, reboot_cb);
+
 static void make_objects(void) {
     img_dsc.header.cf = LV_IMG_CF_INDEXED_1BIT;
-    img_dsc.header.always_zero = 0;
-    img_dsc.header.reserved = 0;
     img_dsc.header.w = HUD_FBW;
     img_dsc.header.h = HUD_H;
     img_dsc.data_size = sizeof(img_buf);
     img_dsc.data = img_buf;
     corner_dsc.header.cf = LV_IMG_CF_INDEXED_1BIT;
-    corner_dsc.header.always_zero = 0;
-    corner_dsc.header.reserved = 0;
     corner_dsc.header.w = HUD_CORNER;
     corner_dsc.header.h = HUD_CORNER;
     corner_dsc.data_size = sizeof(corner_buf);
     corner_dsc.data = corner_buf;
-    memcpy(corner_buf + PAL, hud_corner_bits, sizeof(hud_corner_bits));
+    memcpy(corner_buf + PAL, hud_fw_corner_bits, sizeof(hud_fw_corner_bits));
 
     img = lv_img_create(lv_layer_top());
     lv_img_set_src(img, &img_dsc);
@@ -85,11 +87,12 @@ static void make_objects(void) {
     lv_obj_add_flag(corner_img, LV_OBJ_FLAG_HIDDEN);
 }
 
-static bool diff_area(lv_area_t *a) {
-    const uint8_t *fb = img_buf + PAL;
+static bool load_diff(const uint8_t *src, lv_area_t *a) {
+    uint8_t *fb = img_buf + PAL;
     int y0 = -1, y1 = -1, b0 = HUD_STRIDE, b1 = -1;
     for (int y = 0; y < HUD_H; y++) {
-        const uint8_t *r = fb + y * HUD_STRIDE, *p = prev_fb + y * HUD_STRIDE;
+        const uint8_t *r = src + y * HUD_STRIDE;
+        uint8_t *p = fb + y * HUD_STRIDE;
         if (memcmp(r, p, HUD_STRIDE) == 0) {
             continue;
         }
@@ -103,36 +106,46 @@ static bool diff_area(lv_area_t *a) {
                 if (b > b1) b1 = b;
             }
         }
+        memcpy(p, r, HUD_STRIDE);
     }
     if (y0 < 0) {
         return false;
     }
-    a->x1 = img_x + b0 * 8;
-    a->x2 = img_x + b1 * 8 + 7;
+    a->x1 = b0 * 8;
+    a->x2 = b1 * 8 + 7;
     a->y1 = y0;
     a->y2 = y1;
     return true;
+}
+
+static void send_version(void) {
+    uint8_t rep[HUD_REPORT];
+    hud_fw_version(rep, sizeof(rep), CONFIG_G0N_HUD_NAME, G0N_HUD_COMMIT);
+    raise_raw_hid_sent_event((struct raw_hid_sent_event){.data = rep, .length = sizeof(rep)});
 }
 
 static void tick_cb(struct k_work *work) {
     if (img == NULL) {
         make_objects();
     }
-    uint32_t now = k_uptime_get_32();
-    struct rx_item it;
-    while (k_msgq_get(&hud_rxq, &it, K_NO_WAIT) == 0) {
-        if (it.len == 0) {
-            hud_push_alert(it.data[0], "", 0);
-        } else {
-            hud_rx(it.data, it.len, now);
-        }
+    if (atomic_test_and_clear_bit(&flags, F_VERSION)) {
+        send_version();
     }
-    hud_set_active(!may_be_blanked(), now);
+    if (atomic_test_and_clear_bit(&flags, F_REWAKE)) {
+        woke = false;
+    }
 
-    struct hud_out o;
-    hud_tick(now, img_buf + PAL, &o);
+    struct hud_fw_out o;
+    lv_area_t a;
+    bool changed = false;
+    k_spinlock_key_t key = k_spin_lock(&lock);
+    hud_fw_tick(k_uptime_get_32(), &o);
+    if (o.full) {
+        changed = load_diff(o.fb, &a);
+    }
+    k_spin_unlock(&lock, key);
 
-    if (o.alert && !woke && may_be_blanked()) {
+    if (o.wake && !woke && may_be_blanked()) {
         display_blanking_off(display);
         woke = true;
     }
@@ -142,21 +155,12 @@ static void tick_cb(struct k_work *work) {
         if (!img_shown) {
             lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
             img_shown = true;
-            dirty = true;
-        }
-        if (o.x != img_x) {
-            img_x = o.x;
-            lv_obj_set_x(img, img_x);
-            dirty = true;
-        }
-        lv_area_t a;
-        if (dirty) {
             lv_obj_invalidate(img);
-        } else if (diff_area(&a)) {
+            dirty = true;
+        } else if (changed) {
             lv_obj_invalidate_area(img, &a);
             dirty = true;
         }
-        memcpy(prev_fb, img_buf + PAL, HUD_FB_SIZE);
     } else if (img_shown) {
         lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
         img_shown = false;
@@ -178,7 +182,7 @@ static void tick_cb(struct k_work *work) {
         lv_refr_now(NULL);
     }
 
-    if (!o.alert && woke) {
+    if (!o.wake && woke) {
         woke = false;
         if (may_be_blanked()) {
             display_blanking_on(display);
@@ -199,11 +203,25 @@ static int hud_rx_listener(const zmk_event_t *eh) {
     if (ev == NULL || ev->length == 0) {
         return ZMK_EV_EVENT_BUBBLE;
     }
-    struct rx_item it = {0};
-    it.len = MIN(ev->length, sizeof(it.data));
-    memcpy(it.data, ev->data, it.len);
-    k_msgq_put(&hud_rxq, &it, K_NO_WAIT);
-    kick();
+    k_spinlock_key_t key = k_spin_lock(&lock);
+    enum hud_fw_act act = hud_fw_rx(ev->data, ev->length, k_uptime_get_32());
+    k_spin_unlock(&lock, key);
+    switch (act) {
+    case HUD_ACT_REDRAW:
+        kick();
+        break;
+    case HUD_ACT_VERSION:
+        atomic_set_bit(&flags, F_VERSION);
+        kick();
+        break;
+    case HUD_ACT_BOOT_UF2:
+    case HUD_ACT_BOOT_OTA:
+        boot_type = act == HUD_ACT_BOOT_UF2 ? HUD_BOOT_UF2 : HUD_BOOT_OTA;
+        k_work_reschedule(&reboot_work, K_MSEC(100));
+        break;
+    default:
+        break;
+    }
     return ZMK_EV_EVENT_BUBBLE;
 }
 
@@ -211,6 +229,7 @@ ZMK_LISTENER(g0n_hud_rx, hud_rx_listener);
 ZMK_SUBSCRIPTION(g0n_hud_rx, raw_hid_received_event);
 
 static int hud_activity_listener(const zmk_event_t *eh) {
+    atomic_set_bit(&flags, F_REWAKE);
     kick();
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -232,15 +251,17 @@ static int hud_led_listener(const zmk_event_t *eh) {
     }
     zmk_hid_indicators_t rise = ev->indicators & ~prev_ind;
     prev_ind = ev->indicators;
-    struct rx_item it = {0};
+    uint8_t type;
     if (rise & IND_KANA) {
-        it.data[0] = 0x20;
+        type = HUD_LED_DONE;
     } else if (rise & IND_COMPOSE) {
-        it.data[0] = 0x21;
+        type = HUD_LED_WAIT;
     } else {
         return ZMK_EV_EVENT_BUBBLE;
     }
-    k_msgq_put(&hud_rxq, &it, K_NO_WAIT);
+    k_spinlock_key_t key = k_spin_lock(&lock);
+    hud_fw_led(type, k_uptime_get_32());
+    k_spin_unlock(&lock, key);
     kick();
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -257,6 +278,9 @@ static K_WORK_DELAYABLE_DEFINE(boot_work, boot_cb);
 
 static void boot_cb(struct k_work *work) {
     if (zmk_display_is_initialized()) {
+        k_spinlock_key_t key = k_spin_lock(&lock);
+        hud_fw_init(k_uptime_get_32());
+        k_spin_unlock(&lock, key);
         started = true;
         k_work_reschedule_for_queue(zmk_display_work_q(), &tick_work, K_NO_WAIT);
     } else if (++boot_tries < 40) {
@@ -265,7 +289,6 @@ static void boot_cb(struct k_work *work) {
 }
 
 static int hud_init_sys(void) {
-    hud_init();
     k_work_reschedule(&boot_work, K_MSEC(300));
     return 0;
 }

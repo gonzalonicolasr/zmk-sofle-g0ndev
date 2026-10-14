@@ -14,6 +14,7 @@
 #define ALERTS 4
 #define EXPIRE_MS 120000u
 #define WIPE_MS 260u
+#define TITLE_MS 1800u
 #define FRAME_MS 70u
 #define LINE 100
 
@@ -42,9 +43,10 @@ struct alert {
     struct recs d;
 };
 
-static const uint32_t page_ms[PAGES] = {7000, 6000, 7000, 6000, 6000, 6000};
-static const char *const page_title[PAGES] = {"TRABAJANDO", "LISTOS",  "TE ESPERAN",
+static uint32_t page_ms[PAGES] = {15000, 13000, 15000, 14000, 12000, 12000};
+static const char *page_title[PAGES] = {"TRABAJANDO", "LISTOS",  "TE ESPERAN",
                                               "TUS PENDIENTES", "REUNION", "TU DIA"};
+static const char *page_sub[PAGES] = {"trabajando", "sin ver", "te necesitan", "pendientes", "proxima reunion", "resumen de hoy"};
 
 static struct recs pages[PAGES];
 static struct alert alerts[ALERTS];
@@ -526,7 +528,7 @@ static void draw_work(uint32_t t) {
     const struct recs *r = &pages[P_WORK];
     int n = r->n;
     int np = (n + 2) / 3;
-    int pg = (t / 3500) % np;
+    int pg = (t / 7000) % np;
     char right[24], b1[LINE], b2[LINE], m[16];
     if (np > 1) {
         snprintf(right, sizeof(right), "%d  %d/%d", n, pg + 1, np);
@@ -609,7 +611,7 @@ static void draw_wait_page(uint32_t t) {
     int off = t / 40;
     stripes(0, 0, W, 5, off);
     stripes(0, H - 5, W, 5, -off);
-    int i = (t / 2500) % r->n;
+    int i = (t / 6000) % r->n;
     int beat = (t / 500) % 2;
     hex(14, 30, beat ? 12 : 11, beat);
     if (beat) {
@@ -640,7 +642,7 @@ static void draw_todo(uint32_t t) {
     int n = r->n < 5 ? r->n : 5;
     snprintf(right, sizeof(right), "%d PEND.", r->n);
     tab("TUS ORDENES", right);
-    int cur = (t / 1600) % n;
+    int cur = (t / 3000) % n;
     for (int i = 0; i < n; i++) {
         int y = 13 + i * 10;
         const char *s = fld(r, i, 0);
@@ -648,7 +650,7 @@ static void draw_todo(uint32_t t) {
             fill(0, y - 1, W, 10);
             xor_mode = true;
             rect(1, y + 1, 6, 6);
-            int full = twidth(s, F_S), avail = W - 11, local = t % 1600;
+            int full = twidth(s, F_S), avail = W - 11, local = t % 3000;
             int shift = 0;
             if (full > avail) {
                 shift = (local - 300) * 6 / 100;
@@ -1102,17 +1104,34 @@ static void wipe_title(int x, uint32_t t, const char *title) {
     }
 }
 
+static void title_card(int p, uint32_t t) {
+    char b1[LINE];
+    stripes(0, 0, W, 7, (int)(t / 25));
+    stripes(0, H - 7, W, 7, -(int)(t / 25));
+    const char *ti = page_title[p];
+    text(ti, W / 2, 16, twidth(ti, F_L) <= W ? F_L : F_B, A_C);
+    if (p == P_MEET || p == P_DAY) {
+        text(page_sub[p], W / 2, 41, F_S, A_C);
+    } else {
+        snprintf(b1, sizeof(b1), "%d %s", pages[p].n, page_sub[p]);
+        text(b1, W / 2, 41, F_S, A_C);
+    }
+    if (t < 210) {
+        invert(0, 0, W, H);
+    }
+}
+
 static uint32_t alert_parts(const struct alert *a, const struct hud_anim **anim, uint32_t *card) {
     *anim = NULL;
     *card = 0;
     bool data = a->d.n > 0;
     switch (a->type) {
     case T_SPLASH: *anim = &hud_anim_splash; break;
-    case T_DONE: *anim = &hud_anim_done; *card = data ? 6000 : 0; break;
-    case T_WAIT: *anim = &hud_anim_wait; *card = data ? 8000 : 0; break;
-    case T_MEET: *card = 6000; break;
-    case T_UMB: *card = 4200; break;
-    case T_CONT: *card = 4000; break;
+    case T_DONE: *anim = &hud_anim_done; *card = data ? 15000 : 0; break;
+    case T_WAIT: *anim = &hud_anim_wait; *card = data ? 20000 : 0; break;
+    case T_MEET: *card = 12000; break;
+    case T_UMB: *card = 9000; break;
+    case T_CONT: *card = 9000; break;
     }
     return (*anim ? (*anim)->total_ms : 0) + *card;
 }
@@ -1212,20 +1231,26 @@ void hud_tick(uint32_t now, uint8_t *fb, struct hud_out *o) {
                 ph_t0 = now;
                 continue;
             }
-            if (!page_ok(cur_page, now) || e >= page_ms[cur_page]) {
+            if (!page_ok(cur_page, now) || e >= page_ms[cur_page] + TITLE_MS) {
                 phase = HUD_PH_OUT;
                 ph_t0 = now;
                 continue;
             }
-            draw_page(cur_page, e, now);
+            if (e < TITLE_MS) {
+                title_card(cur_page, e);
+                if (e < WIPE_MS) {
+                    wipe_title(wipe_x(e), e, page_title[cur_page]);
+                }
+                o->full = true;
+                o->next_ms = FRAME_MS;
+                break;
+            }
+            draw_page(cur_page, e - TITLE_MS, now);
             if (cur_page != P_WAIT && waiting && (now / 450) % 2 == 0) {
                 corner(now);
             }
             if (cur_page != P_WAIT && cur_page != P_TODO && cur_page != P_MEET) {
                 pager(now);
-            }
-            if (e < WIPE_MS) {
-                wipe_title(wipe_x(e), e, page_title[cur_page]);
             }
             o->full = true;
             o->next_ms = FRAME_MS;

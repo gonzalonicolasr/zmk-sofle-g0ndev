@@ -1,7 +1,14 @@
 config G0N_HUD
-    bool "g0ndev: HUD por raw HID en el dongle (paginas + avisos NERV)"
+    bool "g0ndev: HUD v2 en el dongle (la PC manda el framebuffer por raw HID)"
     depends on ZMK_DISPLAY && RAW_HID
     select LV_USE_IMG
+
+config G0N_HUD_NAME
+    string "g0ndev: nombre de placa que devuelve la trama de version"
+    depends on G0N_HUD
+    default "corne" if SHIELD_EYESLASH_CORNE_CENTRAL_DONGLE
+    default "sofle" if SHIELD_EYELASH_SOFLE_CENTRAL_DONGLE
+    default "zmk"
 
 config G0N_HUD_LED_FALLBACK
     bool "g0ndev: avisos de agente tambien por LED kana/compose"
