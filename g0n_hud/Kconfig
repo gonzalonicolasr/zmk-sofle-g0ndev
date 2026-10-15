@@ -15,3 +15,8 @@ config G0N_HUD_LED_FALLBACK
     bool "g0ndev: avisos de agente tambien por LED kana/compose"
     depends on G0N_HUD && ZMK_HID_INDICATORS
     default y
+
+config G0N_HUD_SLIDE_MS
+    int "g0ndev: duracion en ms del deslizamiento al entrar y salir del HUD (0 = corte seco)"
+    depends on G0N_HUD
+    default 0

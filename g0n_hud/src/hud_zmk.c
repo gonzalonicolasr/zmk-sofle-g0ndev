@@ -122,6 +122,41 @@ static void make_objects(void) {
     lv_obj_add_flag(corner_img, LV_OBJ_FLAG_HIDDEN);
 }
 
+#if CONFIG_G0N_HUD_SLIDE_MS > 0
+static int32_t img_x;
+
+static void slide_x(void *obj, int32_t v) {
+    img_x = v;
+    lv_obj_set_x(obj, (lv_coord_t)v);
+}
+
+static void slide_done(lv_anim_t *a) {
+    if (!img_shown) {
+        lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void slide(bool in) {
+    lv_anim_del(img, slide_x);
+    if (in && lv_obj_has_flag(img, LV_OBJ_FLAG_HIDDEN)) {
+        slide_x(img, HUD_W);
+        lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
+    }
+    int32_t to = in ? 0 : -HUD_FBW;
+    int32_t dist = to > img_x ? to - img_x : img_x - to;
+    uint32_t ms = (uint32_t)CONFIG_G0N_HUD_SLIDE_MS * (uint32_t)dist / HUD_FBW;
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, img);
+    lv_anim_set_exec_cb(&a, slide_x);
+    lv_anim_set_values(&a, img_x, to);
+    lv_anim_set_time(&a, ms > 0 ? ms : 1);
+    lv_anim_set_path_cb(&a, in ? lv_anim_path_ease_out : lv_anim_path_ease_in);
+    lv_anim_set_ready_cb(&a, slide_done);
+    lv_anim_start(&a);
+}
+#endif
+
 static bool load_diff(const uint8_t *src, lv_area_t *a) {
     uint8_t *fb = img_buf + PAL;
     int y0 = -1, y1 = -1, b0 = HUD_STRIDE, b1 = -1;
@@ -203,7 +238,11 @@ static void tick_cb(struct k_work *work) {
     bool dirty = false;
     if (o.full) {
         if (!img_shown) {
+#if CONFIG_G0N_HUD_SLIDE_MS > 0
+            slide(true);
+#else
             lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
+#endif
             img_shown = true;
             lv_obj_invalidate(img);
             dirty = true;
@@ -212,7 +251,11 @@ static void tick_cb(struct k_work *work) {
             dirty = true;
         }
     } else if (img_shown) {
+#if CONFIG_G0N_HUD_SLIDE_MS > 0
+        slide(false);
+#else
         lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+#endif
         img_shown = false;
         dirty = true;
     }
