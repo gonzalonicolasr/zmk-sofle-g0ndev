@@ -36,7 +36,7 @@
 
 static const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 
-static struct k_spinlock lock;
+static K_MUTEX_DEFINE(lock);
 static uint8_t img_buf[PAL + HUD_FB_SIZE] = {0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0xff};
 static uint8_t corner_buf[PAL + HUD_CORNER * HUD_CORNER_STRIDE] = {0xff, 0xff, 0xff, 0xff,
                                                                   0x00, 0x00, 0x00, 0xff};
@@ -188,12 +188,12 @@ static void tick_cb(struct k_work *work) {
     struct hud_fw_out o;
     lv_area_t a;
     bool changed = false;
-    k_spinlock_key_t key = k_spin_lock(&lock);
+    k_mutex_lock(&lock, K_FOREVER);
     hud_fw_tick(k_uptime_get_32(), &o);
     if (o.full) {
         changed = load_diff(o.fb, &a);
     }
-    k_spin_unlock(&lock, key);
+    k_mutex_unlock(&lock);
 
     if (o.wake && !woke && may_be_blanked()) {
         display_blanking_off(display);
@@ -253,9 +253,9 @@ static int hud_rx_listener(const zmk_event_t *eh) {
     if (ev == NULL || ev->length == 0) {
         return ZMK_EV_EVENT_BUBBLE;
     }
-    k_spinlock_key_t key = k_spin_lock(&lock);
+    k_mutex_lock(&lock, K_FOREVER);
     enum hud_fw_act act = hud_fw_rx(ev->data, ev->length, k_uptime_get_32());
-    k_spin_unlock(&lock, key);
+    k_mutex_unlock(&lock);
     switch (act) {
     case HUD_ACT_REDRAW:
         kick();
@@ -309,9 +309,9 @@ static int hud_led_listener(const zmk_event_t *eh) {
     } else {
         return ZMK_EV_EVENT_BUBBLE;
     }
-    k_spinlock_key_t key = k_spin_lock(&lock);
+    k_mutex_lock(&lock, K_FOREVER);
     hud_fw_led(type, k_uptime_get_32());
-    k_spin_unlock(&lock, key);
+    k_mutex_unlock(&lock);
     kick();
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -328,9 +328,9 @@ static K_WORK_DELAYABLE_DEFINE(boot_work, boot_cb);
 
 static void boot_cb(struct k_work *work) {
     if (zmk_display_is_initialized()) {
-        k_spinlock_key_t key = k_spin_lock(&lock);
+        k_mutex_lock(&lock, K_FOREVER);
         hud_fw_init(k_uptime_get_32());
-        k_spin_unlock(&lock, key);
+        k_mutex_unlock(&lock);
         started = true;
         k_work_reschedule_for_queue(zmk_display_work_q(), &tick_work, K_NO_WAIT);
     } else if (++boot_tries < 40) {
