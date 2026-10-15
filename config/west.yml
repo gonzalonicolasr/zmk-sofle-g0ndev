@@ -1,5 +1,7 @@
 manifest:
   remotes:
+    - name: gonzalonicolasr
+      url-base: https://github.com/gonzalonicolasr
     - name: zmkfirmware
       url-base: https://github.com/zmkfirmware
     - name: gpeye
@@ -49,7 +51,7 @@ manifest:
       remote: mctechnology17
       revision: main
     - name: zmk-raw-hid
-      remote: zzeneg
-      revision: 6a37765dfab6197292e7a9f47305dcf87386d56a
+      remote: gonzalonicolasr
+      revision: 9f87deda41f04578d2314a89bbd692bb2b618c21
   self:
     path: config
