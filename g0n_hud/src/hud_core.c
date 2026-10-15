@@ -360,21 +360,6 @@ static void bang(int x, int y) {
     fill(x + 2, y + 6, 2, 1);
 }
 
-static float fsin(float x) {
-    const float pi = 3.14159265f, tp = 6.2831853f;
-    x -= tp * (float)(int)(x / tp);
-    if (x < 0) {
-        x += tp;
-    }
-    float s = 1;
-    if (x > pi) {
-        x -= pi;
-        s = -1;
-    }
-    float p = x * (pi - x);
-    return s * 16 * p / (5 * pi * pi - 4 * p);
-}
-
 static int iround(float v) { return v >= 0 ? (int)(v + 0.5f) : -(int)(-v + 0.5f); }
 
 static int adv(int f) { return f == F_L ? 12 : f == F_B ? 7 : 6; }
@@ -501,12 +486,59 @@ static const char *mins(char *dst, const char *s) {
     return dst;
 }
 
-static const char *tabname(const char *s) {
-    const char *p = s, *q;
-    while ((q = strstr(p, " > ")) != NULL) {
-        p = q + 3;
+static void where_line(const char *s, int x, int y, int maxw, int f) {
+    char ws[8], b1[LINE];
+    const char *sep = strstr(s, " >");
+    if (!sep) {
+        text(fit(b1, s, maxw, f), x, y, f, A_L);
+        return;
     }
-    return p;
+    int n = sep - s;
+    if (n > 6) {
+        n = 6;
+    }
+    for (int i = 0; i < n; i++) {
+        ws[i] = (s[i] >= 'a' && s[i] <= 'z') ? s[i] - 32 : s[i];
+    }
+    ws[n] = 0;
+    const char *tb = sep + 2;
+    while (*tb == ' ') {
+        tb++;
+    }
+    int bw = 0;
+    if (n > 0) {
+        bw = twidth(ws, F_S) + 3;
+        fill(x, y - 1, bw, 9);
+        xor_mode = !xor_mode;
+        text(ws, x + 2, y, F_S, A_L);
+        xor_mode = !xor_mode;
+        bw += 3;
+    }
+    if (*tb && maxw - bw > 0) {
+        text(fit(b1, tb, maxw - bw, f), x + bw, y, f, A_L);
+    }
+}
+
+static void marquee(const char *s, int x, int y, int avail, int local) {
+    int full = twidth(s, F_S), shift = 0;
+    if (full > avail) {
+        shift = (local - 600) * 6 / 100;
+        if (shift < 0) shift = 0;
+        if (shift > full - avail) shift = full - avail;
+    }
+    cx0 = x;
+    cy0 = y;
+    cx1 = x + avail;
+    cy1 = y + 8;
+    text(s, x - shift, y, F_S, A_L);
+    cx0 = cy0 = 0;
+    cx1 = W;
+    cy1 = H;
+}
+
+static int todo_ms(const char *s, int avail) {
+    int over = twidth(s, F_S) - avail;
+    return 2400 + (over > 0 ? over * 1000 / 60 : 0);
 }
 
 static void tab(const char *label, const char *right) {
@@ -529,35 +561,13 @@ static void draw_work(uint32_t t) {
     int n = r->n;
     int np = (n + 2) / 3;
     int pg = (t / 7000) % np;
-    char right[24], b1[LINE], b2[LINE], m[16];
+    char right[24], b2[LINE], m[16];
     if (np > 1) {
         snprintf(right, sizeof(right), "%d  %d/%d", n, pg + 1, np);
     } else {
         snprintf(right, sizeof(right), "%d", n);
     }
     tab("EN CURSO", right);
-    rect(0, 13, 38, 38);
-    for (int y = 17; y < 50; y += 8) {
-        for (int x = 2; x < 36; x += 4) {
-            px(x, y);
-        }
-    }
-    float s = t / 1000.0f;
-    for (int x = 1; x < 37; x++) {
-        int a = 31 + iround(9 * fsin(x * 0.35f + s * 4.2f));
-        int b = 31 + iround(6 * fsin(x * 0.22f - s * 3.1f + 1.7f) + 3 * fsin(x * 0.9f + s * 6));
-        px(x, a);
-        px(x, a + 1);
-        px(x, b);
-    }
-    int sync = iround(860 + 40 * fsin(s * 1.3f) + 12 * fsin(s * 7));
-    char sy[16];
-    snprintf(sy, sizeof(sy), "%d.%d%%", sync / 10, sync % 10);
-    fill(1, 14, twidth("SYNC", F_S) + 3, 8);
-    xor_mode = true;
-    text("SYNC", 2, 14, F_S, A_L);
-    xor_mode = false;
-    text(sy, 19, 54, F_B, A_C);
     static const int8_t sp[8][2] = {{1, 0}, {2, 0}, {2, 1}, {2, 2}, {1, 2}, {0, 2}, {0, 1}, {0, 0}};
     for (int i = 0; i < 3 && pg * 3 + i < n; i++) {
         int k = pg * 3 + i;
@@ -565,20 +575,20 @@ static void draw_work(uint32_t t) {
         int spin = (t / 120 + i * 2) % 8;
         for (int j = 0; j < 8; j++) {
             if ((j - spin + 8) % 8 < 3) {
-                fill(42 + sp[j][0] * 2, y + 1 + sp[j][1] * 2, 2, 2);
+                fill(sp[j][0] * 2, y + 1 + sp[j][1] * 2, 2, 2);
             }
         }
         const char *mm = mins(m, fld(r, k, 2));
         int mw = twidth(mm, F_S);
-        text(fit(b1, tabname(fld(r, k, 0)), W - 54 - mw, F_B), 50, y, F_B, A_L);
+        where_line(fld(r, k, 0), 9, y, W - 13 - mw, F_S);
         text(mm, W - 1, y, F_S, A_R);
-        text(fit(b2, fld(r, k, 1), W - 50, F_S), 50, y + 8, F_S, A_L);
+        text(fit(b2, fld(r, k, 1), W - 9, F_S), 9, y + 8, F_S, A_L);
     }
 }
 
 static void draw_done(uint32_t t) {
     const struct recs *r = &pages[P_DONE];
-    char right[24], b1[LINE], b2[LINE], m[16];
+    char right[24], b2[LINE], m[16];
     snprintf(right, sizeof(right), "%d SIN VER", r->n);
     tab("LISTOS", right);
     for (int i = 0; i < 3 && i < r->n; i++) {
@@ -596,7 +606,7 @@ static void draw_done(uint32_t t) {
         int y = 13 + i * 17;
         const char *mm = mins(m, fld(r, i, 2));
         check(dx + 1, y + 1);
-        text(fit(b1, tabname(fld(r, i, 0)), W - 16 - twidth(mm, F_S), F_B), dx + 11, y, F_B, A_L);
+        where_line(fld(r, i, 0), dx + 11, y, W - 16 - twidth(mm, F_S), F_S);
         text(mm, dx + W - 1, y, F_S, A_R);
         text(fit(b2, fld(r, i, 1), W - 11, F_S), dx + 11, y + 8, F_S, A_L);
         if (e > 260 && e < 420) {
@@ -607,7 +617,7 @@ static void draw_done(uint32_t t) {
 
 static void draw_wait_page(uint32_t t) {
     const struct recs *r = &pages[P_WAIT];
-    char b1[LINE], m[16], idx[8], ln[3][LINE];
+    char m[16], idx[8], ln[3][LINE];
     int off = t / 40;
     stripes(0, 0, W, 5, off);
     stripes(0, H - 5, W, 5, -off);
@@ -627,12 +637,45 @@ static void draw_wait_page(uint32_t t) {
         text(idx, W - 2, 8, F_S, A_R);
     }
     xor_mode = false;
-    const char *mm = mins(m, fld(r, i, 3));
-    text(fit(b1, tabname(fld(r, i, 0)), W - 36 - twidth(mm, F_S), F_B), 31, 20, F_B, A_L);
-    text(mm, W - 1, 20, F_S, A_R);
+    text(mins(m, fld(r, i, 3)), 14, 47, F_S, A_C);
+    where_line(fld(r, i, 0), 31, 20, W - 31, F_S);
     int k = wrap(ln, fld(r, i, 2), W - 31, F_S, 3);
     for (int j = 0; j < k; j++) {
         text(ln[j], 31, 30 + j * 8, F_S, A_L);
+    }
+}
+
+static void draw_todo_where(uint32_t t, const struct recs *r, int n) {
+    char right[32], b1[LINE];
+    const int per = 3;
+    int avail = W - 10, cyc = 0;
+    for (int i = 0; i < n; i++) {
+        cyc += todo_ms(fld(r, i, 1), avail);
+    }
+    int lt = (int)(t % (uint32_t)cyc), cur = 0;
+    while (cur < n - 1 && lt >= todo_ms(fld(r, cur, 1), avail)) {
+        lt -= todo_ms(fld(r, cur, 1), avail);
+        cur++;
+    }
+    int g0 = cur / per * per, ng = (n + per - 1) / per;
+    if (ng > 1) {
+        snprintf(right, sizeof(right), "%d  %d/%d", r->n, g0 / per + 1, ng);
+    } else {
+        snprintf(right, sizeof(right), "%d", r->n);
+    }
+    tab("PENDIENTES", right);
+    for (int i = g0; i < g0 + per && i < n; i++) {
+        int y = 13 + (i - g0) * 17;
+        const char *s = fld(r, i, 1);
+        if (i == cur) {
+            fill(1, y + 1, 6, 6);
+            where_line(fld(r, i, 0), 10, y, avail, F_S);
+            marquee(s, 10, y + 8, avail, lt);
+        } else {
+            rect(1, y + 1, 6, 6);
+            where_line(fld(r, i, 0), 10, y, avail, F_S);
+            text(fit(b1, s, avail, F_S), 10, y + 8, F_S, A_L);
+        }
     }
 }
 
@@ -640,6 +683,10 @@ static void draw_todo(uint32_t t) {
     const struct recs *r = &pages[P_TODO];
     char right[16], b1[LINE];
     int n = r->n < 5 ? r->n : 5;
+    if (n > 0 && r->nf[0] >= 2) {
+        draw_todo_where(t, r, n);
+        return;
+    }
     snprintf(right, sizeof(right), "%d PEND.", r->n);
     tab("TUS ORDENES", right);
     int cur = (t / 3000) % n;
@@ -776,14 +823,14 @@ static void draw_day(uint32_t t) {
 }
 
 static void card_done(uint32_t t, const struct recs *d) {
-    char b1[LINE], ln[2][LINE], tk[32];
+    char ln[2][LINE], tk[32];
     fill(0, 0, W, 10);
     xor_mode = true;
     check(2, 1);
     text("LISTO", 12, 1, F_B, A_L);
     text(fld(d, 0, 0), W - 2, 1, F_S, A_R);
     xor_mode = false;
-    text(fit(b1, fld(d, 0, 1), W, F_B), 0, 13, F_B, A_L);
+    where_line(fld(d, 0, 1), 0, 13, W, F_B);
     int k = wrap(ln, fld(d, 0, 2), W, F_S, 2);
     for (int i = 0; i < k; i++) {
         text(ln[i], 0, 23 + i * 9, F_S, A_L);
@@ -801,7 +848,7 @@ static void card_done(uint32_t t, const struct recs *d) {
 }
 
 static void card_wait(uint32_t t, uint32_t since, const struct recs *d) {
-    char b1[LINE], ln[3][LINE], ago[24];
+    char ln[3][LINE], ago[24];
     fill(0, 0, W, 10);
     xor_mode = true;
     bang(2, 1);
@@ -811,7 +858,7 @@ static void card_wait(uint32_t t, uint32_t since, const struct recs *d) {
     if ((t / 300) % 2 == 0 && t < 2400) {
         invert(0, 0, W, 10);
     }
-    text(fit(b1, fld(d, 0, 1), W, F_B), 0, 13, F_B, A_L);
+    where_line(fld(d, 0, 1), 0, 13, W, F_B);
     rect(0, 23, W, 31);
     int k = wrap(ln, fld(d, 0, 2), W - 6, F_S, 3);
     for (int i = 0; i < k; i++) {

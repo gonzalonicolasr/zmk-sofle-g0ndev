@@ -4,7 +4,9 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/init.h>
+#include <zephyr/fatal.h>
 #include <zephyr/kernel.h>
+#include <zephyr/linker/section_tags.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/reboot.h>
 #include <lvgl.h>
@@ -51,6 +53,39 @@ static uint8_t boot_type;
 
 #define F_VERSION 0
 #define F_REWAKE 1
+
+#define HUD_T_CRASH 0x52
+#define CRASH_MAGIC 0x6730c4a5
+
+struct crash_rec {
+    uint32_t magic;
+    uint32_t count;
+    uint32_t reason;
+    uint32_t pc;
+    uint32_t lr;
+    uint32_t uptime_s;
+    char name[12];
+};
+
+static __noinit struct crash_rec crash;
+
+void k_sys_fatal_error_handler(unsigned int reason, const z_arch_esf_t *esf) {
+    if (crash.magic != CRASH_MAGIC) {
+        crash.count = 0;
+    }
+    crash.magic = CRASH_MAGIC;
+    crash.count++;
+    crash.reason = reason;
+    crash.pc = esf ? esf->basic.pc : 0;
+    crash.lr = esf ? esf->basic.lr : 0;
+    crash.uptime_s = k_uptime_get_32() / 1000;
+    const char *n = k_thread_name_get(k_current_get());
+    memset(crash.name, 0, sizeof(crash.name));
+    if (n) {
+        strncpy(crash.name, n, sizeof(crash.name) - 1);
+    }
+    sys_reboot(SYS_REBOOT_COLD);
+}
 
 static bool may_be_blanked(void) {
     return IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE) &&
@@ -121,6 +156,21 @@ static bool load_diff(const uint8_t *src, lv_area_t *a) {
 static void send_version(void) {
     uint8_t rep[HUD_REPORT];
     hud_fw_version(rep, sizeof(rep), CONFIG_G0N_HUD_NAME, G0N_HUD_COMMIT);
+    raise_raw_hid_sent_event((struct raw_hid_sent_event){.data = rep, .length = sizeof(rep)});
+
+    memset(rep, 0, sizeof(rep));
+    rep[0] = HUD_MAGIC;
+    rep[1] = HUD_T_CRASH;
+    uint32_t up = k_uptime_get_32() / 1000;
+    memcpy(rep + 2, &up, 4);
+    if (crash.magic == CRASH_MAGIC) {
+        memcpy(rep + 6, &crash.count, 4);
+        rep[10] = (uint8_t)crash.reason;
+        memcpy(rep + 11, &crash.pc, 4);
+        memcpy(rep + 15, &crash.lr, 4);
+        memcpy(rep + 19, &crash.uptime_s, 2);
+        memcpy(rep + 21, crash.name, 11);
+    }
     raise_raw_hid_sent_event((struct raw_hid_sent_event){.data = rep, .length = sizeof(rep)});
 }
 

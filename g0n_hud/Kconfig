@@ -2,6 +2,7 @@ config G0N_HUD
     bool "g0ndev: HUD v2 en el dongle (la PC manda el framebuffer por raw HID)"
     depends on ZMK_DISPLAY && RAW_HID
     select LV_USE_IMG
+    select THREAD_NAME
 
 config G0N_HUD_NAME
     string "g0ndev: nombre de placa que devuelve la trama de version"
